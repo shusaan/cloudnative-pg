@@ -43,6 +43,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/pooler/registry"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/pooler/secrets"
 )
 
 // PoolerReconciler reconciles a Pooler object
@@ -51,11 +53,13 @@ type PoolerReconciler struct {
 	DiscoveryClient discovery.DiscoveryInterface
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
+	SecretUpdater   secrets.SecretUpdater
 }
 
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=poolers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=poolers/status,verbs=get;update;patch;watch
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=poolers/finalizers,verbs=update
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;watch;delete;patch
 // +kubebuilder:rbac:groups="",resources=secrets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;create;delete;update;patch;list;watch
@@ -121,7 +125,25 @@ func (r *PoolerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Take the required actions to align the spec with the collected status
-	return ctrl.Result{}, r.updateOwnedObjects(ctx, &pooler, resources)
+	if err := r.updateOwnedObjects(ctx, &pooler, resources); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Reconcile cluster secrets for pooler usage
+	if err := r.reconcileClusterSecrets(ctx, &pooler); err != nil {
+		contextLogger.Error(err, "Failed to reconcile cluster secrets")
+		
+		// Handle conflicts with immediate requeue
+		if apierrs.IsConflict(err) {
+			contextLogger.Debug("Conflict detected, requeuing immediately")
+			return ctrl.Result{Requeue: true}, nil
+		}
+		
+		// For other errors, requeue with delay
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager setup this controller inside the controller manager
@@ -329,4 +351,88 @@ func getPoolersUsingSecret(poolers apiv1.PoolerList, secret *corev1.Secret) (req
 		}
 	}
 	return requests
+}
+// reconcileClusterSecrets handles secret updates when pooler state changes
+func (r *PoolerReconciler) reconcileClusterSecrets(ctx context.Context, pooler *apiv1.Pooler) error {
+	contextLogger := log.FromContext(ctx).WithValues(
+		"pooler", pooler.Name,
+		"cluster", pooler.Spec.Cluster.Name,
+		"namespace", pooler.Namespace,
+	)
+
+	if r.SecretUpdater == nil {
+		contextLogger.Debug("SecretUpdater not configured, skipping secret reconciliation")
+		return nil
+	}
+
+	// Get the cluster resource
+	cluster := &apiv1.Cluster{}
+	clusterKey := client.ObjectKey{Name: pooler.Spec.Cluster.Name, Namespace: pooler.Namespace}
+	
+	if err := r.Get(ctx, clusterKey, cluster); err != nil {
+		if apierrs.IsNotFound(err) {
+			contextLogger.Info("Cluster not found, skipping secret update")
+			return nil
+		}
+		return fmt.Errorf("failed to get cluster %s: %w", pooler.Spec.Cluster.Name, err)
+	}
+
+	// Check if this pooler is being deleted
+	if !pooler.DeletionTimestamp.IsZero() {
+		return r.handlePoolerDeletion(ctx, cluster)
+	}
+
+	// Update secrets to use this pooler
+	if err := r.SecretUpdater.UpdateSecretsForPooler(ctx, cluster, pooler); err != nil {
+		contextLogger.Error(err, "Failed to update secrets for pooler")
+		r.Recorder.Event(pooler, "Warning", "SecretUpdateFailed", 
+			fmt.Sprintf("Failed to update cluster secrets: %v", err))
+		return err
+	}
+
+	contextLogger.Info("Successfully updated cluster secrets for pooler")
+	r.Recorder.Event(pooler, "Normal", "SecretUpdated", 
+		"Cluster secrets updated to use pooler service")
+	
+	return nil
+}
+
+// handlePoolerDeletion processes secret updates when pooler is deleted
+func (r *PoolerReconciler) handlePoolerDeletion(ctx context.Context, cluster *apiv1.Cluster) error {
+	contextLogger := log.FromContext(ctx).WithValues(
+		"cluster", cluster.Name,
+		"namespace", cluster.Namespace,
+	)
+
+	contextLogger.Info("Handling pooler deletion, checking for remaining poolers")
+
+	// Check if there are other active poolers for this cluster
+	activePooler, err := r.SecretUpdater.GetActivePoolerForCluster(ctx, cluster.Name, cluster.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get active pooler for cluster %s: %w", cluster.Name, err)
+	}
+
+	if activePooler != nil {
+		// There's another pooler, update secrets to use it
+		contextLogger.Info("Found another active pooler, updating secrets", "activePooler", activePooler.Name)
+		if err := r.SecretUpdater.UpdateSecretsForPooler(ctx, cluster, activePooler); err != nil {
+			contextLogger.Error(err, "Failed to update secrets for remaining pooler")
+			return err
+		}
+		
+		r.Recorder.Event(cluster, "Normal", "SecretUpdated", 
+			fmt.Sprintf("Cluster secrets updated to use pooler %s", activePooler.Name))
+	} else {
+		// No more poolers, revert to cluster service
+		contextLogger.Info("No remaining poolers, reverting secrets to cluster service")
+		if err := r.SecretUpdater.RevertSecretsToCluster(ctx, cluster); err != nil {
+			contextLogger.Error(err, "Failed to revert secrets to cluster service")
+			return err
+		}
+		
+		r.Recorder.Event(cluster, "Normal", "SecretReverted", 
+			"Cluster secrets reverted to use cluster service")
+	}
+
+	return nil
 }

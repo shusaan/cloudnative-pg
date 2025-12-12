@@ -42,6 +42,8 @@ import (
 	webhookv1 "github.com/cloudnative-pg/cloudnative-pg/internal/webhook/v1"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/certs"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/multicache"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/pooler/registry"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/pooler/secrets"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
 )
@@ -254,11 +256,16 @@ func RunController(
 		return err
 	}
 
+	// Initialize pooler registry and secret updater
+	poolerRegistry := registry.NewPoolerRegistry(mgr.GetClient())
+	secretUpdater := secrets.NewSecretUpdater(mgr.GetClient(), poolerRegistry)
+
 	if err = (&controller.PoolerReconciler{
 		Client:          mgr.GetClient(),
 		DiscoveryClient: discoveryClient,
 		Scheme:          mgr.GetScheme(),
 		Recorder:        mgr.GetEventRecorderFor("cloudnative-pg-pooler"),
+		SecretUpdater:   secretUpdater,
 	}).SetupWithManager(mgr, maxConcurrentReconciles); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pooler")
 		return err
