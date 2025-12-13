@@ -106,6 +106,8 @@ func RunController(
 	setupLog.Info("Starting CloudNativePG Operator",
 		"version", versions.Version,
 		"build", versions.Info)
+	
+	setupLog.Info("Pooler Secret Update Feature Enabled")
 
 	managerOptions := ctrl.Options{
 		Scheme:           scheme,
@@ -257,6 +259,7 @@ func RunController(
 	}
 
 	// Initialize pooler registry and secret updater
+
 	poolerRegistry := registry.NewPoolerRegistry(mgr.GetClient())
 	secretUpdater := secrets.NewSecretUpdater(mgr.GetClient(), poolerRegistry)
 

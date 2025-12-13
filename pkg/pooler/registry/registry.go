@@ -25,9 +25,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudnative-pg/machinery/pkg/log"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -62,35 +60,23 @@ func NewPoolerRegistry(client client.Client) PoolerRegistry {
 
 // RegisterPooler adds a pooler to the registry (no-op since we use Kubernetes API directly)
 func (r *poolerRegistry) RegisterPooler(ctx context.Context, pooler *apiv1.Pooler) error {
-	contextLogger := log.FromContext(ctx).WithValues(
-		"pooler", pooler.Name,
-		"cluster", pooler.Spec.Cluster.Name,
-		"namespace", pooler.Namespace,
-	)
 
-	contextLogger.Debug("Registering pooler in registry")
+
 	// Since we use Kubernetes API directly, registration is implicit when the pooler exists
 	return nil
 }
 
 // UnregisterPooler removes a pooler from the registry (no-op since we use Kubernetes API directly)
 func (r *poolerRegistry) UnregisterPooler(ctx context.Context, poolerName, namespace string) error {
-	contextLogger := log.FromContext(ctx).WithValues(
-		"pooler", poolerName,
-		"namespace", namespace,
-	)
 
-	contextLogger.Debug("Unregistering pooler from registry")
+
+
 	// Since we use Kubernetes API directly, unregistration is implicit when the pooler is deleted
 	return nil
 }
 
 // GetActivePooler returns the most recent pooler for a cluster based on creation timestamp
 func (r *poolerRegistry) GetActivePooler(ctx context.Context, clusterName, namespace string) (*apiv1.Pooler, error) {
-	contextLogger := log.FromContext(ctx).WithValues(
-		"cluster", clusterName,
-		"namespace", namespace,
-	)
 
 	poolers, err := r.ListPoolersForCluster(ctx, clusterName, namespace)
 	if err != nil {
@@ -98,7 +84,6 @@ func (r *poolerRegistry) GetActivePooler(ctx context.Context, clusterName, names
 	}
 
 	if len(poolers) == 0 {
-		contextLogger.Debug("No poolers found for cluster")
 		return nil, nil
 	}
 
@@ -106,17 +91,11 @@ func (r *poolerRegistry) GetActivePooler(ctx context.Context, clusterName, names
 	r.sortPoolersByPrecedence(poolers)
 
 	activePooler := &poolers[0]
-	contextLogger.Debug("Found active pooler", "activePooler", activePooler.Name)
-
 	return activePooler, nil
 }
 
 // ListPoolersForCluster returns all poolers associated with a specific cluster
 func (r *poolerRegistry) ListPoolersForCluster(ctx context.Context, clusterName, namespace string) ([]apiv1.Pooler, error) {
-	contextLogger := log.FromContext(ctx).WithValues(
-		"cluster", clusterName,
-		"namespace", namespace,
-	)
 
 	var poolerList apiv1.PoolerList
 	listOpts := []client.ListOption{
@@ -135,7 +114,7 @@ func (r *poolerRegistry) ListPoolersForCluster(ctx context.Context, clusterName,
 		}
 	}
 
-	contextLogger.Debug("Found poolers for cluster", "count", len(clusterPoolers))
+
 	return clusterPoolers, nil
 }
 

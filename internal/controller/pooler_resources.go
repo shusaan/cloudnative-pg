@@ -104,39 +104,45 @@ func (r *PoolerReconciler) getManagedResources(
 		}
 	}
 
-	// Get the server CA secret
-	result.ServerCASecret, err = getSecretOrNil(
-		ctx,
-		r.Client,
-		client.ObjectKey{
-			Name:      pooler.GetServerCASecretNameOrDefault(result.Cluster),
-			Namespace: pooler.Namespace,
-		},
-	)
-	if err != nil {
-		return nil, err
+	// Get the server CA secret (only if cluster exists)
+	if result.Cluster != nil {
+		result.ServerCASecret, err = getSecretOrNil(
+			ctx,
+			r.Client,
+			client.ObjectKey{
+				Name:      pooler.GetServerCASecretNameOrDefault(result.Cluster),
+				Namespace: pooler.Namespace,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Get the client CA secret
-	result.ClientCASecret, err = getSecretOrNil(
-		ctx, r.Client, client.ObjectKey{
-			Name:      pooler.GetClientCASecretNameOrDefault(result.Cluster),
-			Namespace: pooler.Namespace,
-		},
-	)
-	if err != nil {
-		return nil, err
+	// Get the client CA secret (only if cluster exists)
+	if result.Cluster != nil {
+		result.ClientCASecret, err = getSecretOrNil(
+			ctx, r.Client, client.ObjectKey{
+				Name:      pooler.GetClientCASecretNameOrDefault(result.Cluster),
+				Namespace: pooler.Namespace,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Get the client TLS secret
-	result.ClientTLSSecret, err = getSecretOrNil(
-		ctx, r.Client, client.ObjectKey{
-			Name:      pooler.GetClientTLSSecretNameOrDefault(result.Cluster),
-			Namespace: pooler.Namespace,
-		},
-	)
-	if err != nil {
-		return nil, err
+	// Get the client TLS secret (only if cluster exists)
+	if result.Cluster != nil {
+		result.ClientTLSSecret, err = getSecretOrNil(
+			ctx, r.Client, client.ObjectKey{
+				Name:      pooler.GetClientTLSSecretNameOrDefault(result.Cluster),
+				Namespace: pooler.Namespace,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Get the pooler deployment

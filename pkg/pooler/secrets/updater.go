@@ -70,26 +70,28 @@ func (s *secretUpdater) UpdateSecretsForPooler(ctx context.Context, cluster *api
 		"namespace", cluster.Namespace,
 	)
 
-	contextLogger.Info("Updating cluster secrets to use pooler service")
+
 
 	// Get pooler service name
 	poolerServiceName := pooler.Name
 	
 	// Update application secret
-	if err := s.updateSecretForService(ctx, cluster.GetApplicationSecretName(), cluster.Namespace, poolerServiceName, cluster.GetApplicationDatabaseName()); err != nil {
+	appSecretName := cluster.GetApplicationSecretName()
+	if err := s.updateSecretForService(ctx, appSecretName, cluster.Namespace, poolerServiceName, cluster.GetApplicationDatabaseName()); err != nil {
 		contextLogger.Error(err, "Failed to update application secret for pooler")
 		return fmt.Errorf("failed to update application secret: %w", err)
 	}
 
 	// Update superuser secret if enabled
 	if cluster.GetEnableSuperuserAccess() {
-		if err := s.updateSecretForService(ctx, cluster.GetSuperuserSecretName(), cluster.Namespace, poolerServiceName, "postgres"); err != nil {
+		superuserSecretName := cluster.GetSuperuserSecretName()
+		if err := s.updateSecretForService(ctx, superuserSecretName, cluster.Namespace, poolerServiceName, "postgres"); err != nil {
 			contextLogger.Error(err, "Failed to update superuser secret for pooler")
 			return fmt.Errorf("failed to update superuser secret: %w", err)
 		}
 	}
 
-	contextLogger.Info("Successfully updated cluster secrets to use pooler service")
+	contextLogger.Info("Successfully updated cluster secrets to use pooler service", "pooler", pooler.Name)
 	return nil
 }
 
